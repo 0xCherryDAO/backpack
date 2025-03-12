@@ -1,0 +1,2 @@
+﻿login:pass@ip:port|change_link (if mobile proxy)
+login:pass@ip:port

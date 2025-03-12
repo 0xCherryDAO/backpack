@@ -1,0 +1,11 @@
+aiohttp==3.10.11
+aiohttp_socks==0.9.1
+ccxt==4.4.39
+colorama==0.4.6
+loguru==0.7.2
+pydantic==2.10.3
+pyuseragents==1.0.5
+questionary==2.0.1
+SQLAlchemy==2.0.36
+typing_extensions==4.12.2
+aiosqlite==0.20.0

@@ -1,0 +1,462 @@
+import random
+from typing import Optional, Literal, List, Dict
+from asyncio import sleep
+from decimal import Decimal, ROUND_DOWN
+
+from loguru import logger
+
+from config import *
+from src.models.cex import OKXConfig, WithdrawSettings, CEXConfig, DepositSettings
+from src.models.route import Route
+from src.modules.backpack.backpack_account import BackpackAccount
+from src.modules.cex.okx.okx import OKX
+from src.utils.proxy_manager import Proxy
+
+
+async def process_backpack_spot(route: Route) -> Optional[bool]:
+    side = BackpackSpotSettings.side
+    symbol = random.choice(BackpackSpotSettings.symbol) + '_USDC'
+    time_in_force: Literal['IOC', 'FOK', 'GTC'] = 'FOK'
+
+    token = symbol.split('_')[0]
+
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+
+    try:
+        if side == 'Bid':  # BUY (side == 'Bid')
+            usdc_balance = await backpack.get_balances("USDC")
+            logger.info(f"USDC balance: {usdc_balance}")
+
+            if BackpackSpotSettings.use_percentage_usdc:
+                percentage = random.uniform(BackpackSpotSettings.trade_percentage_usdc[0],
+                                            BackpackSpotSettings.trade_percentage_usdc[1])
+                amount_usdc = usdc_balance * percentage
+                logger.info(f"Using {percentage * 100:.2f}% of balance ({amount_usdc} USDC) for purchase")
+            else:
+                amount_usdc = random.uniform(BackpackSpotSettings.amount_usdc[0],
+                                             BackpackSpotSettings.amount_usdc[1])
+                if amount_usdc > usdc_balance:
+                    logger.warning(f"Insufficient USDC balance: {usdc_balance}, needed: {amount_usdc}")
+                    return False
+                logger.info(f"Using fixed amount: {amount_usdc} USDC for purchase")
+
+            result = await backpack.post_limit_order(
+                symbol=symbol,
+                side='Bid',
+                amount_usd=amount_usdc,
+                time_in_force=time_in_force
+            )
+
+        else:  # SELL (side == 'Ask')
+            token_balance = await backpack.get_balances(token)
+            logger.info(f"{token} balance: {token_balance}")
+
+            token_decimals = await backpack.get_token_decimals(symbol) or 6
+            logger.info(f"{token} decimal precision: {token_decimals}")
+
+            if BackpackSpotSettings.use_percentage_token:
+                percentage = random.uniform(BackpackSpotSettings.trade_percentage_token[0],
+                                            BackpackSpotSettings.trade_percentage_token[1])
+
+                raw_amount = token_balance * percentage
+
+                precise_amount = Decimal(str(raw_amount)).quantize(
+                    Decimal('0.' + '0' * token_decimals),
+                    rounding=ROUND_DOWN
+                )
+
+                amount_token = float(precise_amount)
+
+                logger.info(
+                    f"Selling {percentage * 100:.2f}% of balance ({raw_amount} →"
+                    f" {amount_token} {token}, rounded to {token_decimals} decimals)")
+            else:
+                amount_token = random.uniform(BackpackSpotSettings.amount_token[0],
+                                              BackpackSpotSettings.amount_token[1])
+                if amount_token > token_balance:
+                    logger.warning(f"Insufficient {token} balance: {token_balance}, needed: {amount_token}")
+                    return False
+
+                precise_amount = Decimal(str(amount_token)).quantize(
+                    Decimal('0.' + '0' * token_decimals),
+                    rounding=ROUND_DOWN
+                )
+
+                amount_token = float(precise_amount)
+
+                logger.info(f"Selling fixed amount: {amount_token} {token} (rounded to {token_decimals} decimals)")
+
+            if amount_token <= 0:
+                logger.warning(f"After rounding, amount became zero. Skipping trade.")
+                return False
+
+            result = await backpack.post_limit_sell_order(
+                symbol=symbol,
+                amount_token=amount_token,
+                time_in_force=time_in_force
+            )
+
+        if result:
+            if isinstance(result, dict) and 'status' in result:
+                if result['status'] == 'Filled':
+                    logger.success(f"Order filled successfully!")
+                elif result['status'] == 'New':
+                    logger.info(f"Order placed successfully and is now active")
+                else:
+                    logger.info(f"Order status: {result['status']}")
+            else:
+                logger.info(f"Order placed, response: {result}")
+
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to place spot order: {ex}")
+        return False
+
+
+async def process_backpack_futures(route: Route) -> Optional[bool]:
+    amount = random.uniform(BackpackFuturesSettings.amount[0], BackpackFuturesSettings.amount[1])
+    side = BackpackFuturesSettings.side
+    use_percentage = BackpackFuturesSettings.use_percentage
+    percentage = random.uniform(BackpackFuturesSettings.trade_percentage[0],
+                                BackpackFuturesSettings.trade_percentage[1])
+    leverage = BackpackFuturesSettings.leverage
+    symbol = random.choice(BackpackFuturesSettings.symbol) + '_USDC_PERP'
+
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+
+    usdc_balance = await backpack.get_balances("USDC")
+    amount_usd = amount * leverage
+    if use_percentage:
+        amount_usd = usdc_balance * percentage * leverage
+        logger.info(
+            f"Using {percentage * 100}% of balance ({usdc_balance * percentage} USDC) with {leverage}x leverage")
+    else:
+        if amount > usdc_balance:
+            logger.warning(f"Insufficient USDC balance: {usdc_balance}, needed: {amount}")
+            return False
+
+    try:
+        await backpack.open_futures_pos(
+            symbol=symbol,
+            side=side,
+            amount_usd=amount_usd
+        )
+        logger.info(
+            f"Opened {side} position on {BackpackFuturesSettings.symbol} "
+            f"with {amount_usd} USDC (leverage: {leverage}x)"
+        )
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to open position: {ex}")
+        return False
+
+
+async def process_random_swaps(route: Route) -> Optional[bool]:
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+
+    num_swaps = random.randint(
+        RandomSpotSwapsSettings.num_of_swaps[0],
+        RandomSpotSwapsSettings.num_of_swaps[1]
+    )
+
+    logger.info(f"Starting {num_swaps} random token purchases")
+
+    successful_swaps = 0
+    time_in_force: Literal['IOC', 'FOK', 'GTC'] = 'GTC'
+
+    try:
+        for i in range(num_swaps):
+            try:
+                usdc_balance = await backpack.get_balances("USDC")
+                if usdc_balance <= 0.2:
+                    logger.warning("Insufficient USDC balance for further purchases")
+                    break
+
+                symbol = random.choice(RandomSpotSwapsSettings.symbols) + '_USDC'
+
+                percentage = random.uniform(
+                    RandomSpotSwapsSettings.swap_percentage[0],
+                    RandomSpotSwapsSettings.swap_percentage[1]
+                )
+
+                amount_usdc = usdc_balance * percentage
+
+                logger.info(
+                    f"Purchase {i + 1}/{num_swaps}: {symbol} for {amount_usdc:.4f}"
+                    f" USDC ({percentage * 100:.2f}% of current USDC balance)")
+
+                try:
+                    result = await backpack.post_limit_order(
+                        symbol=symbol,
+                        side='Bid',
+                        amount_usd=amount_usdc,
+                        time_in_force=time_in_force
+                    )
+
+                    if 'status' in result and (result['status'] == 'Filled' or result['status'] == 'New'):
+                        logger.success(f"Buy order for {symbol} successfully placed: {result['status']}")
+                        successful_swaps += 1
+                    else:
+                        logger.warning(f"Unexpected response when placing buy order: {result}")
+                except Exception as ex:
+                    logger.error(f"Failed to place buy order for {symbol}: {ex}")
+
+            except Exception as ex:
+                logger.error(f"Error during purchase {i + 1}: {ex}")
+
+            time_to_sleep = random.randint(PAUSE_BETWEEN_MODULES[0], PAUSE_BETWEEN_MODULES[1])
+            logger.info(f'Sleeping {time_to_sleep} seconds...')
+            await sleep(time_to_sleep)
+
+        logger.info(f"Completed {successful_swaps} successful purchases out of {num_swaps} attempts")
+        return successful_swaps > 0
+
+    except Exception as ex:
+        logger.error(f"Error in process_random_swaps: {ex}")
+        return False
+
+
+async def process_swap_all_to_usdc(route: Route) -> Optional[bool]:
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+
+    logger.info("Starting conversion of all tokens to USDC")
+    time_in_force: Literal['IOC', 'FOK', 'GTC'] = 'GTC'
+
+    try:
+        all_balances = await backpack.get_balances()
+
+        if not all_balances:
+            logger.info("No balances found or failed to get balance information")
+            return False
+
+        any_success = False
+
+        for token, balance_info in all_balances.items():
+            if token in ["USDC"]:
+                continue
+
+            token_balance = float(balance_info['available'])
+            if token_balance <= 0:
+                continue
+
+            trading_pair = f"{token}_USDC"
+
+            try:
+                token_price = await backpack.get_token_price(trading_pair)
+                token_decimals = await backpack.get_token_decimals(trading_pair) or 6
+                usdc_value = token_balance * float(token_price)
+
+                logger.info(
+                    f"Balance {token}: {token_balance}, Value in USDC: ~{usdc_value:.4f}, Precision: {token_decimals}")
+
+                precise_balance = Decimal(str(token_balance)).quantize(
+                    Decimal('0.' + '0' * token_decimals),
+                    rounding=ROUND_DOWN
+                )
+
+                amount_to_swap = float(precise_balance)
+
+                if amount_to_swap <= 0:
+                    logger.warning(
+                        f"After rounding to {token_decimals} decimals, {token} balance became zero, skipping")
+                    continue
+
+                logger.info(
+                    f"Attempting to convert {amount_to_swap} {token} (rounded according to precision {token_decimals})")
+
+                try:
+                    result = await backpack.post_limit_sell_order(
+                        symbol=trading_pair,
+                        amount_token=amount_to_swap,
+                        time_in_force=time_in_force
+                    )
+
+                    if 'status' in result and (result['status'] == 'Filled' or result['status'] == 'New'):
+                        logger.success(f"Order for {token} successfully placed: {result['status']}")
+                        any_success = True
+                    else:
+                        logger.warning(f"Unexpected response when placing order for {token}: {result}")
+                except Exception as ex:
+                    logger.warning(f"Failed to place order for {token}: {ex}")
+
+            except Exception as ex:
+                logger.error(f"Error processing {token}: {ex}")
+
+            time_to_sleep = random.randint(PAUSE_BETWEEN_MODULES[0], PAUSE_BETWEEN_MODULES[1])
+            logger.info(f'Sleeping {time_to_sleep} seconds...')
+            await sleep(time_to_sleep)
+
+        return any_success
+
+    except Exception as ex:
+        logger.error(f"Error in process_swap_all_to_usdc: {ex}")
+        return False
+
+
+async def process_close_all_positions(route: Route) -> Optional[bool]:
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+
+    logger.info(f"Closing all positions for account")
+
+    await backpack.check_all_positions()
+
+    result = await backpack.close_all_positions()
+
+    if result == 1:
+        logger.success(f"Successfully closed all positions")
+        return True
+    else:
+        logger.info(f"No positions to close or closing failed")
+        return False
+
+
+async def process_get_usdc_symbols(route: Route) -> Optional[bool]:
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+    spot, futures = await backpack.get_usdc_symbols()
+    print(spot)
+    print('\n', futures)
+    if spot:
+        return True
+
+
+async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optional[List[str]] = None) -> Dict[str, str]:
+    with open('deposit_addresses.txt', 'w') as file:
+        file.write("# API Key : Deposit Address\n")
+
+    logger.info(f"Processing {len(api_keys)} API keys to get deposit addresses")
+
+    results = {}
+
+    use_proxies = proxies and len(proxies) > 0
+
+    for i, api_key in enumerate(api_keys):
+        try:
+            current_proxy = None
+
+            if use_proxies:
+                proxy_index = i % len(proxies)
+                proxy_str = proxies[proxy_index]
+                if proxy_str and proxy_str.strip():
+                    if not proxy_str.startswith(('http://', 'https://', 'socks5://')):
+                        proxy_str = f"http://{proxy_str}"
+
+                    current_proxy = Proxy(proxy_url=proxy_str)
+
+            backpack = BackpackAccount(
+                proxy=current_proxy,
+                api_key=api_key
+            )
+
+            address = await backpack.get_deposit_address(chain='Solana')
+            shortened_key = api_key[:6] + '...' + api_key[-4:]
+            logger.success(f"[{i + 1}/{len(api_keys)}] Retrieved Solana deposit address for {shortened_key}: {address}")
+
+            results[api_key] = address
+
+            with open('deposit_addresses.txt', 'a') as file:
+                file.write(f"{api_key}:{address}\n")
+
+            if i < len(api_keys) - 1:
+                time_to_pause = random.randint(PAUSE_BETWEEN_MODULES[0], PAUSE_BETWEEN_MODULES[1])
+                logger.info(f'Sleeping {time_to_pause} seconds before next wallet...')
+                await sleep(time_to_pause)
+
+        except Exception as ex:
+            logger.error(f"[{i + 1}/{len(api_keys)}] Failed to get deposit address for key {api_key[:6]}...: {ex}")
+
+    logger.info(f"Successfully retrieved {len(results)} deposit addresses out of {len(api_keys)}")
+    return results
+
+
+async def process_cex_withdraw(route: Route) -> bool:
+    backpack = BackpackAccount(
+        proxy=route.wallet.proxy,
+        api_key=route.wallet.private_key
+    )
+
+    address = await backpack.get_deposit_address(chain='Solana')
+
+    chain = OKXWithdrawSettings.chain
+    token = OKXWithdrawSettings.token
+    amount = OKXWithdrawSettings.amount
+
+    okx_config = OKXConfig(
+        deposit_settings=None,
+        withdraw_settings=WithdrawSettings(
+            token=token,
+            chain=chain,
+            to_address=str(address),
+            amount=amount
+        ),
+        API_KEY=OKXSettings.API_KEY,
+        API_SECRET=OKXSettings.API_SECRET,
+        PASSPHRASE=OKXSettings.API_PASSWORD,
+        PROXY=OKXSettings.PROXY
+    )
+
+    config = CEXConfig(
+        okx_config=okx_config,
+    )
+    cex = OKX(
+        config=config,
+        private_key=route.wallet.private_key,
+        proxy=OKXSettings.PROXY
+    )
+
+    logger.debug(cex)
+    withdrawn = await cex.okx_withdraw()
+
+    if withdrawn is True:
+        return True
+
+
+async def process_cex_deposit(route: Route) -> Optional[bool]:
+    keep_balance = OKXDepositSettings.keep_balance
+    token = OKXDepositSettings.token
+    chain = OKXDepositSettings.chain
+    okx_config = OKXConfig(
+        deposit_settings=DepositSettings(
+            token=token,
+            chain=chain,
+            to_address=route.wallet.recipient,
+            keep_balance=keep_balance
+        ),
+        withdraw_settings=None,
+        API_KEY=OKXSettings.API_KEY,
+        API_SECRET=OKXSettings.API_SECRET,
+        PASSPHRASE=OKXSettings.API_PASSWORD,
+        PROXY=OKXSettings.PROXY
+    )
+
+    config = CEXConfig(
+        okx_config=okx_config
+    )
+    cex = OKX(
+        config=config,
+        private_key=route.wallet.private_key,
+        proxy=route.wallet.proxy
+    )
+
+    logger.debug(cex)
+    deposited = await cex.deposit()
+
+    if deposited:
+        return True
