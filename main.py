@@ -17,7 +17,7 @@ from src.utils.manage_tasks import manage_tasks
 from src.utils.retrieve_route import get_routes
 from src.models.route import Route
 from src.utils.tg_app.telegram_notifications import TGApp
-from src.utils.runner import process_multiple_deposit_addresses
+from src.utils.runner import process_multiple_deposit_addresses, process_forks
 
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
@@ -33,6 +33,7 @@ def get_module():
         choices=[
             Choice(title="1) Generate new database", value=1),
             Choice(title="2) Work with existing database", value=2),
+            Choice(title="3) Forks mode", value=3),
             Choice(title="4) Get deposit addresses", value=4),
         ],
         qmark="⚙️ ",
@@ -97,6 +98,8 @@ async def main(module: Callable) -> None:
         logger.debug("Working with the database")
         routes = await get_routes(private_keys)
         await process_task(routes)
+    elif module == 3:
+        await process_forks(private_keys, proxies)
     elif module == 4:
         logger.debug("Getting deposit addresses for all wallets")
         await process_multiple_deposit_addresses(private_keys, proxies)

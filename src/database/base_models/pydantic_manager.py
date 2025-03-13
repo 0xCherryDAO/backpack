@@ -3,6 +3,7 @@ from pydantic import BaseModel, validator, Field, root_validator
 from src.database.models import (
     WorkingWallets,
     WalletsTasks,
+    Forks
 )
 
 
@@ -13,7 +14,7 @@ class DataBaseManagerConfig(BaseModel):
 
     @validator('action', pre=True)
     def validate_action(cls, v):
-        if v not in ['working_wallets', 'wallets_tasks']:
+        if v not in ['working_wallets', 'wallets_tasks', 'forks_mode']:
             raise ValueError(f'...')
         return v
 
@@ -22,7 +23,7 @@ class DataBaseManagerConfig(BaseModel):
         table_mapping = {
             'working_wallets': WorkingWallets,
             'wallets_tasks': WalletsTasks,
-
+            'forks_mode': Forks
         }
         action = values.get('action')
 

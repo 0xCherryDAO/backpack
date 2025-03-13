@@ -6,6 +6,8 @@ from decimal import Decimal, ROUND_DOWN
 from loguru import logger
 
 from config import *
+from src.database.base_models.pydantic_manager import DataBaseManagerConfig
+from src.database.utils.db_manager import DataBaseUtils
 from src.models.cex import OKXConfig, WithdrawSettings, CEXConfig, DepositSettings
 from src.models.route import Route
 from src.modules.backpack.backpack_account import BackpackAccount
@@ -337,7 +339,8 @@ async def process_get_usdc_symbols(route: Route) -> Optional[bool]:
         return True
 
 
-async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optional[List[str]] = None) -> Dict[str, str]:
+async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optional[List[str]] = None) -> Dict[
+    str, str]:
     with open('deposit_addresses.txt', 'w') as file:
         file.write("# API Key : Deposit Address\n")
 
@@ -460,3 +463,165 @@ async def process_cex_deposit(route: Route) -> Optional[bool]:
 
     if deposited:
         return True
+
+
+import random
+
+
+def create_delta_neutral_strategy(balances):
+    accounts = list(balances.keys())
+    all_positions = []
+    num_pairs = 3
+    used_accounts = set()
+    MAX_LEVERAGE = 5.0  # Добавляем максимальное ограничение на плечо
+
+    for _ in range(num_pairs):
+        symbol = f"{random.choice(BackpackFuturesSettings.symbol)}_USDC_PERP"
+        remaining_accounts = [acc for acc in accounts if acc not in used_accounts]
+        if len(remaining_accounts) < 3:
+            break
+
+        # Long позиция
+        long_account = random.choice(remaining_accounts)
+        used_accounts.add(long_account)
+
+        # Используем большую часть баланса для base_size, но не более 75%
+        long_base_size = round(balances[long_account] * random.uniform(0.65, 0.8))
+        long_leverage = random.randint(2, 5)
+        long_position_size = round(long_base_size * long_leverage, 2)
+
+        # Short позиции
+        short_accounts = random.sample(
+            [acc for acc in remaining_accounts if acc != long_account],
+            random.randint(2, min(4, len(remaining_accounts) - 1))
+        )
+        used_accounts.update(short_accounts)
+
+        # Распределяем total_short_size пропорционально балансам
+        total_available_short = sum(balances[acc] for acc in short_accounts)
+        short_positions = []
+
+        for acc in short_accounts:
+            # Вычисляем долю этого аккаунта в общем short
+            proportion = balances[acc] / total_available_short
+            target_total_size = round(long_position_size * proportion, 2)
+
+            # Устанавливаем минимальное плечо, используя максимум доступного баланса
+            leverage = min(MAX_LEVERAGE, max(2, random.uniform(2, 3)))
+            base_size = round(target_total_size / leverage, 2)
+
+            # Корректируем, если base_size превышает доступный баланс
+            if base_size > balances[acc] * 0.75:  # Ограничение 75% от баланса
+                base_size = round(balances[acc] * 0.75, 2)
+                leverage = round(target_total_size / base_size, 2)
+                leverage = min(MAX_LEVERAGE, max(2, leverage))
+                target_total_size = round(base_size * leverage, 2)
+
+            short_positions.append({
+                "symbol": symbol,
+                "account": acc,
+                "direction": "short",
+                "base_size": base_size,
+                "leverage": leverage,
+                "total_size": target_total_size
+            })
+
+        # Корректировка для точной дельта-нейтральности
+        total_short_size = sum(pos["total_size"] for pos in short_positions)
+        correction_factor = long_position_size / total_short_size if total_short_size > 0 else 1
+
+        for pos in short_positions:
+            pos["total_size"] = round(pos["total_size"] * correction_factor, 2)
+            pos["base_size"] = round(pos["total_size"] / pos["leverage"], 2)
+            if pos["base_size"] > balances[pos["account"]] * 0.75:
+                pos["base_size"] = round(balances[pos["account"]] * 0.75, 2)
+                pos["leverage"] = round(pos["total_size"] / pos["base_size"], 2)
+                if pos['leverage'] > MAX_LEVERAGE:
+                    pos['leverage'] = MAX_LEVERAGE
+                pos["total_size"] = round(pos["base_size"] * pos["leverage"], 2)
+
+        all_positions.append({
+            "symbol": symbol,
+            "account": long_account,
+            "direction": "long",
+            "base_size": long_base_size,
+            "leverage": long_leverage,
+            "total_size": long_position_size
+        })
+        all_positions.extend(short_positions)
+
+    return all_positions
+
+
+async def process_forks(keys: list[str], proxies: list[str]):
+    use_proxies = proxies and len(proxies) > 0
+    balance_mapping = {
+        "api_1": 100,
+        "api_2": 190,
+        "api_3": 370,
+        "api_4": 200,
+        "api_5": 30,
+        "api_6": 480,
+        "api_7": 50,
+        "api_8": 70,
+        "api_9": 100,
+        "api_10": 190,
+        "api_11": 297,
+        "api_12": 467,
+        "api_13": 50,
+    }
+
+    db_utils = DataBaseUtils(
+        manager_config=DataBaseManagerConfig(
+            action='forks_mode'
+        )
+    )
+
+    symbol = random.choice(BackpackFuturesSettings.symbol) + '_USDC_PERP'
+
+    # for i, api_key in enumerate(keys):
+    #     current_proxy = None
+    #
+    #     if use_proxies:
+    #         proxy_index = i % len(proxies)
+    #         proxy_str = proxies[proxy_index]
+    #         if proxy_str and proxy_str.strip():
+    #             if not proxy_str.startswith(('http://', 'https://', 'socks5://')):
+    #                 proxy_str = f"http://{proxy_str}"
+    #
+    #             current_proxy = Proxy(proxy_url=proxy_str)
+    #
+    #     backpack = BackpackAccount(
+    #         proxy=current_proxy,
+    #         api_key=api_key
+    #     )
+    #
+    #     balance = await backpack.get_balances("USDC")
+    #     balance_mapping.update({api_key: balance})
+
+    result = create_delta_neutral_strategy(balance_mapping)
+    print("Дельта-нейтральная стратегия:")
+    symbol_totals = {}
+
+    for pos in result:
+        print(f"Символ: {pos['symbol']}")
+        print(f"Аккаунт: {pos['account']}")
+        print(f"Направление: {pos['direction']}")
+        print(f"Базовый размер: ${pos['base_size']}")
+        print(f"Плечо: {pos['leverage']}x")
+        print(f"Итоговый размер: ${pos['total_size']}")
+        print("---")
+
+        if pos['symbol'] not in symbol_totals:
+            symbol_totals[pos['symbol']] = {"long": 0, "short": 0}
+        if pos['direction'] == "long":
+            symbol_totals[pos['symbol']]["long"] += pos['total_size']
+        else:
+            symbol_totals[pos['symbol']]["short"] += pos['total_size']
+
+    print('===================')
+    for symbol, totals in symbol_totals.items():
+        print(f"\nСимвол: {symbol}")
+        print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
+        print(f"Итоговый размер шорт: ${round(totals['short'], 2)}")
+        print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")

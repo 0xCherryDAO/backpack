@@ -2,12 +2,13 @@ import logging
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-
+from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import (
     Sequence,
     Integer,
     Column,
     String,
+    Float,
 )
 
 Base = declarative_base()
@@ -29,6 +30,16 @@ class WalletsTasks(Base):
     id = Column(Integer, Sequence('wallets_tasks_id_seq'), primary_key=True)
     private_key = Column(String, unique=False)
     task_name = Column(String, unique=False)
+    status = Column(String, unique=False)
+
+
+class Forks(Base):
+    __tablename__ = 'forks'
+
+    id = Column(Integer, Sequence('forks_id_seq'), primary_key=True)
+    symbol = Column(String, unique=False)
+    accounts = Column(JSON, unique=False)
+    forks = Column(JSON, unique=False)
     status = Column(String, unique=False)
 
 
