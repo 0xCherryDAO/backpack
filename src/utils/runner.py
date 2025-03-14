@@ -472,7 +472,7 @@ def create_delta_neutral_strategy(balances):
     MAX_LEVERAGE = 5.0
 
     total_accounts = len(accounts)
-    min_accounts_per_pair = 4
+    min_accounts_per_pair = 3
     max_accounts_per_pair = 6
     avg_accounts_per_pair = 5
     num_pairs = total_accounts // avg_accounts_per_pair
@@ -496,7 +496,7 @@ def create_delta_neutral_strategy(balances):
 
         remaining_after_long = [acc for acc in remaining_accounts if acc != long_account]
         max_short_accounts = min(5, len(remaining_after_long))
-        min_short_accounts = 3
+        min_short_accounts = 2
         num_short_accounts = random.randint(min_short_accounts, min(max_short_accounts, max_accounts_per_pair - 1))
 
         short_accounts = random.sample(remaining_after_long, num_short_accounts)
@@ -540,9 +540,8 @@ def create_delta_neutral_strategy(balances):
                     pos["leverage"] = MAX_LEVERAGE
                 pos["total_size"] = round(pos["base_size"] * pos["leverage"], 2)
 
-            # Уникальность total_size с небольшим отклонением
             while pos["total_size"] in used_total_sizes:
-                deviation = random.uniform(-0.5, 0.5)  # Небольшое отклонение
+                deviation = random.uniform(-0.5, 0.5)
                 pos["total_size"] = round(pos["total_size"] + deviation, 2)
                 pos["base_size"] = round(pos["total_size"] / pos["leverage"], 2)
                 if pos["base_size"] > balances[pos["account"]]:
@@ -569,29 +568,7 @@ async def process_forks(keys: list[str], proxies: list[str]):
         "api_1": 100,
         "api_2": 190,
         "api_3": 370,
-        "api_4": 200,
-        "api_5": 30,
-        "api_6": 480,
-        "api_7": 50,
-        "api_8": 70,
-        "api_9": 100,
-        "api_10": 190,
-        "api_11": 297,
-        "api_12": 467,
-        "api_14": 50,
-        "api_15": 50,
-        "api_16": 50,
-        "api_17": 50,
-        "api_18": 50,
-        "api_19": 50,
-        "api_20": 50,
-        "api_21": 50,
-        "api_23": 50,
-        "api_22": 50,
-        "api_24": 50,
-        "api_25": 50,
-        "api_27": 50,
-        "api_30": 50,
+
     }
 
     db_utils = DataBaseUtils(
