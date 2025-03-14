@@ -473,7 +473,7 @@ def create_delta_neutral_strategy(balances):
     all_positions = []
     num_pairs = 3
     used_accounts = set()
-    MAX_LEVERAGE = 5.0  # Добавляем максимальное ограничение на плечо
+    MAX_LEVERAGE = 5.0
 
     for _ in range(num_pairs):
         symbol = f"{random.choice(BackpackFuturesSettings.symbol)}_USDC_PERP"
@@ -481,63 +481,48 @@ def create_delta_neutral_strategy(balances):
         if len(remaining_accounts) < 3:
             break
 
-        # Long позиция
         long_account = random.choice(remaining_accounts)
         used_accounts.add(long_account)
 
-        # Используем большую часть баланса для base_size, но не более 75%
-        long_base_size = round(balances[long_account] * random.uniform(0.65, 0.8))
+        long_base_size = round(balances[long_account] * random.uniform(0.65, 0.75))
+        if long_base_size > balances[long_account] * 0.75:
+            long_base_size = round(balances[long_account] * 0.75)
         long_leverage = random.randint(2, 5)
         long_position_size = round(long_base_size * long_leverage, 2)
 
-        # Short позиции
         short_accounts = random.sample(
             [acc for acc in remaining_accounts if acc != long_account],
             random.randint(2, min(4, len(remaining_accounts) - 1))
         )
         used_accounts.update(short_accounts)
 
-        # Распределяем total_short_size пропорционально балансам
         total_available_short = sum(balances[acc] for acc in short_accounts)
         short_positions = []
 
         for acc in short_accounts:
-            # Вычисляем долю этого аккаунта в общем short
             proportion = balances[acc] / total_available_short
             target_total_size = round(long_position_size * proportion, 2)
 
-            # Устанавливаем минимальное плечо, используя максимум доступного баланса
             leverage = min(MAX_LEVERAGE, max(2, random.uniform(2, 3)))
             base_size = round(target_total_size / leverage, 2)
-
-            # Корректируем, если base_size превышает доступный баланс
-            if base_size > balances[acc] * 0.75:  # Ограничение 75% от баланса
-                base_size = round(balances[acc] * 0.75, 2)
-                leverage = round(target_total_size / base_size, 2)
-                leverage = min(MAX_LEVERAGE, max(2, leverage))
-                target_total_size = round(base_size * leverage, 2)
 
             short_positions.append({
                 "symbol": symbol,
                 "account": acc,
                 "direction": "short",
                 "base_size": base_size,
-                "leverage": leverage,
+                "leverage": round(leverage, 2),
                 "total_size": target_total_size
             })
 
-        # Корректировка для точной дельта-нейтральности
         total_short_size = sum(pos["total_size"] for pos in short_positions)
         correction_factor = long_position_size / total_short_size if total_short_size > 0 else 1
 
         for pos in short_positions:
             pos["total_size"] = round(pos["total_size"] * correction_factor, 2)
             pos["base_size"] = round(pos["total_size"] / pos["leverage"], 2)
-            if pos["base_size"] > balances[pos["account"]] * 0.75:
-                pos["base_size"] = round(balances[pos["account"]] * 0.75, 2)
-                pos["leverage"] = round(pos["total_size"] / pos["base_size"], 2)
-                if pos['leverage'] > MAX_LEVERAGE:
-                    pos['leverage'] = MAX_LEVERAGE
+            if pos['leverage'] > MAX_LEVERAGE:
+                pos['leverage'] = MAX_LEVERAGE
                 pos["total_size"] = round(pos["base_size"] * pos["leverage"], 2)
 
         all_positions.append({
