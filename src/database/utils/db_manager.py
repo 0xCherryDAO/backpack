@@ -4,6 +4,7 @@ import asyncio
 from typing import (
     Optional,
     Type,
+    Any,
 )
 
 from sqlalchemy import select, delete
@@ -13,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from loguru import logger
 
 from src.database.base_models.pydantic_manager import DataBaseManagerConfig
-from src.database.models import engine, WorkingWallets, WalletsTasks
+from src.database.models import engine, WorkingWallets, WalletsTasks, Forks
 
 
 class DataBaseUtils:
@@ -143,3 +144,24 @@ class DataBaseUtils:
             query = select(func.count()).select_from(WorkingWallets)
             result = await session.execute(query)
             return result.scalar()
+
+    async def fill_forks_table(self, forks_by_symbol: dict[str, Any]):
+        async with self.db_lock:
+            async with self.session() as session:
+                await session.execute(delete(Forks))
+
+                for symbol, data in forks_by_symbol.items():
+                    fork_entry = Forks(
+                        symbol=symbol,
+                        accounts=data['accounts'],
+                        forks={
+                            'long': data['long'],
+                            'short': data['short']
+                        },
+                        status='pending'
+                    )
+                    session.add(fork_entry)
+
+                    logger.success(f'Added {symbol} forks data')
+
+                    await session.commit()

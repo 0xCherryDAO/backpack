@@ -465,20 +465,24 @@ async def process_cex_deposit(route: Route) -> Optional[bool]:
         return True
 
 
-import random
-
-
 def create_delta_neutral_strategy(balances):
     accounts = list(balances.keys())
     all_positions = []
-    num_pairs = 3
     used_accounts = set()
     MAX_LEVERAGE = 5.0
+
+    total_accounts = len(accounts)
+    min_accounts_per_pair = 4
+    max_accounts_per_pair = 6
+    avg_accounts_per_pair = 5
+    num_pairs = total_accounts // avg_accounts_per_pair
+    if total_accounts >= min_accounts_per_pair and num_pairs == 0:
+        num_pairs = 1
 
     for _ in range(num_pairs):
         symbol = f"{random.choice(BackpackFuturesSettings.symbol)}_USDC_PERP"
         remaining_accounts = [acc for acc in accounts if acc not in used_accounts]
-        if len(remaining_accounts) < 3:
+        if len(remaining_accounts) < min_accounts_per_pair:
             break
 
         long_account = random.choice(remaining_accounts)
@@ -490,10 +494,12 @@ def create_delta_neutral_strategy(balances):
         long_leverage = random.randint(2, 5)
         long_position_size = round(long_base_size * long_leverage, 2)
 
-        short_accounts = random.sample(
-            [acc for acc in remaining_accounts if acc != long_account],
-            random.randint(2, min(4, len(remaining_accounts) - 1))
-        )
+        remaining_after_long = [acc for acc in remaining_accounts if acc != long_account]
+        max_short_accounts = min(5, len(remaining_after_long))
+        min_short_accounts = 3
+        num_short_accounts = random.randint(min_short_accounts, min(max_short_accounts, max_accounts_per_pair - 1))
+
+        short_accounts = random.sample(remaining_after_long, num_short_accounts)
         used_accounts.update(short_accounts)
 
         total_available_short = sum(balances[acc] for acc in short_accounts)
@@ -522,6 +528,7 @@ def create_delta_neutral_strategy(balances):
         total_short_size = sum(pos["total_size"] for pos in short_positions)
         correction_factor = long_position_size / total_short_size if total_short_size > 0 else 1
 
+        used_total_sizes = set()
         for pos in short_positions:
             pos["total_size"] = round(pos["total_size"] * correction_factor, 2)
             pos["base_size"] = round(pos["total_size"] / pos["leverage"], 2)
@@ -532,6 +539,16 @@ def create_delta_neutral_strategy(balances):
                 if pos["leverage"] > MAX_LEVERAGE:
                     pos["leverage"] = MAX_LEVERAGE
                 pos["total_size"] = round(pos["base_size"] * pos["leverage"], 2)
+
+            # Уникальность total_size с небольшим отклонением
+            while pos["total_size"] in used_total_sizes:
+                deviation = random.uniform(-0.5, 0.5)  # Небольшое отклонение
+                pos["total_size"] = round(pos["total_size"] + deviation, 2)
+                pos["base_size"] = round(pos["total_size"] / pos["leverage"], 2)
+                if pos["base_size"] > balances[pos["account"]]:
+                    pos["base_size"] = round(balances[pos["account"]], 2)
+                    pos["total_size"] = round(pos["base_size"] * pos["leverage"], 2)
+            used_total_sizes.add(pos["total_size"])
 
         all_positions.append({
             "symbol": symbol,
@@ -561,7 +578,20 @@ async def process_forks(keys: list[str], proxies: list[str]):
         "api_10": 190,
         "api_11": 297,
         "api_12": 467,
-        "api_13": 50,
+        "api_14": 50,
+        "api_15": 50,
+        "api_16": 50,
+        "api_17": 50,
+        "api_18": 50,
+        "api_19": 50,
+        "api_20": 50,
+        "api_21": 50,
+        "api_23": 50,
+        "api_22": 50,
+        "api_24": 50,
+        "api_25": 50,
+        "api_27": 50,
+        "api_30": 50,
     }
 
     db_utils = DataBaseUtils(
@@ -618,8 +648,9 @@ async def process_forks(keys: list[str], proxies: list[str]):
             forks_by_symbol[symbol]['short'].append(pos_data)
 
     print(forks_by_symbol)
+    await db_utils.fill_forks_table(forks_by_symbol)
 
-    # for pos in result:
+    for pos in result:
         # print(f"Символ: {pos['symbol']}")
         # print(f"Аккаунт: {pos['account']}")
         # print(f"Направление: {pos['direction']}")
@@ -627,16 +658,16 @@ async def process_forks(keys: list[str], proxies: list[str]):
         # print(f"Плечо: {pos['leverage']}x")
         # print(f"Итоговый размер: ${pos['total_size']}")
         # print("---")
-        # if pos['symbol'] not in symbol_totals:
-        #     symbol_totals[pos['symbol']] = {"long": 0, "short": 0}
-        # if pos['direction'] == "long":
-        #     symbol_totals[pos['symbol']]["long"] += pos['total_size']
-        # else:
-        #     symbol_totals[pos['symbol']]["short"] += pos['total_size']
+        if pos['symbol'] not in symbol_totals:
+            symbol_totals[pos['symbol']] = {"long": 0, "short": 0}
+        if pos['direction'] == "long":
+            symbol_totals[pos['symbol']]["long"] += pos['total_size']
+        else:
+            symbol_totals[pos['symbol']]["short"] += pos['total_size']
 
-    # print('===================')
-    # for symbol, totals in symbol_totals.items():
-    #     print(f"\nСимвол: {symbol}")
-    #     print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
-    #     print(f"Итоговый размер шорт: ${round(totals['short'], 2)}")
-    #     print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")
+    print('===================')
+    for symbol, totals in symbol_totals.items():
+        print(f"\nСимвол: {symbol}")
+        print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
+        print(f"Итоговый размер шорт: ${round(totals['short'], 2)}")
+        print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")
