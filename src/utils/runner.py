@@ -506,6 +506,10 @@ def create_delta_neutral_strategy(balances):
             leverage = min(MAX_LEVERAGE, max(2, random.uniform(2, 3)))
             base_size = round(target_total_size / leverage, 2)
 
+            if base_size > balances[acc]:
+                base_size = round(balances[acc], 2)
+                target_total_size = round(base_size * leverage, 2)
+
             short_positions.append({
                 "symbol": symbol,
                 "account": acc,
@@ -521,8 +525,12 @@ def create_delta_neutral_strategy(balances):
         for pos in short_positions:
             pos["total_size"] = round(pos["total_size"] * correction_factor, 2)
             pos["base_size"] = round(pos["total_size"] / pos["leverage"], 2)
-            if pos['leverage'] > MAX_LEVERAGE:
-                pos['leverage'] = MAX_LEVERAGE
+
+            if pos["base_size"] > balances[pos["account"]]:
+                pos["base_size"] = round(balances[pos["account"]], 2)
+                pos["leverage"] = round(pos["total_size"] / pos["base_size"], 2)
+                if pos["leverage"] > MAX_LEVERAGE:
+                    pos["leverage"] = MAX_LEVERAGE
                 pos["total_size"] = round(pos["base_size"] * pos["leverage"], 2)
 
         all_positions.append({
@@ -585,28 +593,50 @@ async def process_forks(keys: list[str], proxies: list[str]):
     #     balance_mapping.update({api_key: balance})
 
     result = create_delta_neutral_strategy(balance_mapping)
-    print("Дельта-нейтральная стратегия:")
+
     symbol_totals = {}
 
-    for pos in result:
-        print(f"Символ: {pos['symbol']}")
-        print(f"Аккаунт: {pos['account']}")
-        print(f"Направление: {pos['direction']}")
-        print(f"Базовый размер: ${pos['base_size']}")
-        print(f"Плечо: {pos['leverage']}x")
-        print(f"Итоговый размер: ${pos['total_size']}")
-        print("---")
+    # print(result)
+    forks_by_symbol = {}
+    for position in result:
+        symbol = position['symbol']
+        if symbol not in forks_by_symbol:
+            forks_by_symbol[symbol] = {'accounts': [], 'long': [], 'short': []}
 
-        if pos['symbol'] not in symbol_totals:
-            symbol_totals[pos['symbol']] = {"long": 0, "short": 0}
-        if pos['direction'] == "long":
-            symbol_totals[pos['symbol']]["long"] += pos['total_size']
+        if position['account'] not in forks_by_symbol[symbol]['accounts']:
+            forks_by_symbol[symbol]['accounts'].append(position['account'])
+
+        pos_data = {
+            'account': position['account'],
+            'base_size': position['base_size'],
+            'leverage': position['leverage'],
+            'total_size': position['total_size']
+        }
+        if position['direction'] == 'long':
+            forks_by_symbol[symbol]['long'].append(pos_data)
         else:
-            symbol_totals[pos['symbol']]["short"] += pos['total_size']
+            forks_by_symbol[symbol]['short'].append(pos_data)
 
-    print('===================')
-    for symbol, totals in symbol_totals.items():
-        print(f"\nСимвол: {symbol}")
-        print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
-        print(f"Итоговый размер шорт: ${round(totals['short'], 2)}")
-        print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")
+    print(forks_by_symbol)
+
+    # for pos in result:
+        # print(f"Символ: {pos['symbol']}")
+        # print(f"Аккаунт: {pos['account']}")
+        # print(f"Направление: {pos['direction']}")
+        # print(f"Базовый размер: ${pos['base_size']}")
+        # print(f"Плечо: {pos['leverage']}x")
+        # print(f"Итоговый размер: ${pos['total_size']}")
+        # print("---")
+        # if pos['symbol'] not in symbol_totals:
+        #     symbol_totals[pos['symbol']] = {"long": 0, "short": 0}
+        # if pos['direction'] == "long":
+        #     symbol_totals[pos['symbol']]["long"] += pos['total_size']
+        # else:
+        #     symbol_totals[pos['symbol']]["short"] += pos['total_size']
+
+    # print('===================')
+    # for symbol, totals in symbol_totals.items():
+    #     print(f"\nСимвол: {symbol}")
+    #     print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
+    #     print(f"Итоговый размер шорт: ${round(totals['short'], 2)}")
+    #     print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")
