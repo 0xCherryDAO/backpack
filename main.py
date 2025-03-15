@@ -13,11 +13,11 @@ from src.utils.data.helper import private_keys, proxies, recipients, filter_and_
 from src.database.generate_database import generate_database
 from src.database.models import init_models, engine
 from src.utils.data.mappings import module_handlers
-from src.utils.manage_tasks import manage_tasks
-from src.utils.retrieve_route import get_routes
+from src.utils.manage_tasks import manage_tasks, manage_fork
+from src.utils.retrieve_route import get_routes, get_forks_tasks
 from src.models.route import Route
 from src.utils.tg_app.telegram_notifications import TGApp
-from src.utils.runner import process_multiple_deposit_addresses, process_forks
+from src.utils.runner import process_multiple_deposit_addresses, process_forks_database_creation, process_fork
 
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
@@ -99,7 +99,30 @@ async def main(module: Callable) -> None:
         routes = await get_routes(private_keys)
         await process_task(routes)
     elif module == 3:
-        await process_forks(private_keys, proxies)
+        result = await select(
+            message="Choose module",
+            choices=[
+                Choice(title="1) Generate new forks database", value=1),
+                Choice(title="2) Work with existing forks database", value=2),
+            ],
+            qmark="⚙️ ",
+            pointer="✅ "
+        ).ask_async()
+        if result == 1:
+            await process_forks_database_creation(private_keys, proxies)
+        elif result == 2:
+            tasks = await get_forks_tasks()
+            if not tasks:
+                logger.success(f'All forks are completed. Create new database.')
+                return
+            for task in tasks:
+                completed = await process_fork(task)
+                if completed:
+                    await manage_fork(task.id)
+
+                time_to_sleep = random.randint(PAUSE_BETWEEN_WALLETS[0], PAUSE_BETWEEN_WALLETS[1])
+                logger.info(f'Sleeping {time_to_sleep} seconds before next fork...')
+                await sleep(time_to_sleep)
     elif module == 4:
         logger.debug("Getting deposit addresses for all wallets")
         await process_multiple_deposit_addresses(private_keys, proxies)

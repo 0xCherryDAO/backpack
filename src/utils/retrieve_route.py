@@ -16,7 +16,7 @@ async def get_routes(private_keys: str) -> Optional[List[Route]]:
     result = await db_utils.get_uncompleted_wallets()
     if not result:
         logger.success(f'Все кошельки с данной базы данных уже отработали')
-        return
+        return None
 
     routes = []
     for wallet in result:
@@ -37,3 +37,12 @@ async def get_routes(private_keys: str) -> Optional[List[Route]]:
                     )
                 )
     return routes
+
+
+async def get_forks_tasks():
+    db_utils = DataBaseUtils(
+        manager_config=DataBaseManagerConfig(
+            action='forks_mode'
+        )
+    )
+    return await db_utils.get_uncompleted_forks()

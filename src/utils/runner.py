@@ -7,6 +7,7 @@ from loguru import logger
 
 from config import *
 from src.database.base_models.pydantic_manager import DataBaseManagerConfig
+from src.database.models import Forks
 from src.database.utils.db_manager import DataBaseUtils
 from src.models.cex import OKXConfig, WithdrawSettings, CEXConfig, DepositSettings
 from src.models.route import Route
@@ -562,12 +563,12 @@ def create_delta_neutral_strategy(balances):
     return all_positions
 
 
-async def process_forks(keys: list[str], proxies: list[str]):
+async def process_forks_database_creation(keys: list[str], proxies: list[str]):
     use_proxies = proxies and len(proxies) > 0
     balance_mapping = {
-        "api_1": 100,
-        "api_2": 190,
-        "api_3": 370,
+        "api_1": 500,
+        "api_2": 50,
+        "api_3": 50,
 
     }
 
@@ -648,3 +649,47 @@ async def process_forks(keys: list[str], proxies: list[str]):
         print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
         print(f"Итоговый размер шорт: ${round(totals['short'], 2)}")
         print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")
+
+
+async def process_fork(task: Forks) -> bool:
+    symbol = task.symbol
+    forks = task.forks
+
+    all_positions = []
+
+    for pos in forks['long']:
+        pos_with_type = pos.copy()
+        pos_with_type['type'] = 'Bid'
+        all_positions.append(pos_with_type)
+
+    for pos in forks['short']:
+        pos_with_type = pos.copy()
+        pos_with_type['type'] = 'Ask'
+        all_positions.append(pos_with_type)
+
+    random.shuffle(all_positions)
+
+    for position in all_positions:
+        try:
+            backpack = BackpackAccount(
+                proxy=None,
+                api_key=position['account']
+            )
+
+            await backpack.open_futures_pos(
+                symbol=symbol,
+                side=position['type'],
+                amount_usd=position['total_size']
+            )
+            logger.info(
+                f"Opened {position['type']} position on {BackpackFuturesSettings.symbol} "
+                f"with {position['total_size']} USDC (leverage: {position['leverage']}x)"
+            )
+        except Exception as ex:
+            logger.error(f"Failed to open position: {ex}")
+
+        time_to_sleep = random.randint(PAUSE_BETWEEN_MODULES[0], PAUSE_BETWEEN_MODULES[1])
+        logger.info(f'Sleeping {time_to_sleep} seconds...')
+        await sleep(time_to_sleep)
+
+    return True

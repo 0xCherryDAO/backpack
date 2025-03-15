@@ -165,3 +165,23 @@ class DataBaseUtils:
                     logger.success(f'Added {symbol} forks data')
 
                     await session.commit()
+
+    async def get_uncompleted_forks(self):
+        async with self.session() as session:
+            query = select(Forks).filter_by(status='pending')
+            result = await session.execute(query)
+            wallets = result.scalars().all()
+
+        return wallets
+
+    async def update_fork_status(self, task_id: int):
+        query = select(Forks).filter_by(id=task_id)
+        async with self.db_lock:
+            async with self.session() as session:
+                result = await session.execute(query)
+                existing_entry = result.scalars().first()
+
+                if existing_entry:
+                    existing_entry.status = 'completed'
+                    logger.info(f'🔄 | Updated existing entry for fork id: {task_id}')
+                    await session.commit()
