@@ -360,7 +360,6 @@ async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optio
             proxy = proxies[key_index]
             proxy_index = (proxy_index + 1) % len(proxies)
 
-            proxy_url = None
             change_link = ''
 
             if proxy:
@@ -369,7 +368,7 @@ async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optio
                 else:
                     proxy_url = proxy
 
-            proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
+                proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
 
             backpack = BackpackAccount(
                 proxy=proxy,
@@ -589,16 +588,16 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
         proxy = proxies[key_index]
         proxy_index = (proxy_index + 1) % len(proxies)
 
-        proxy_url = None
         change_link = ''
 
+        proxy = None
         if proxy:
             if MOBILE_PROXY:
                 proxy_url, change_link = proxy.split('|')
             else:
                 proxy_url = proxy
 
-        proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
+            proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
 
         backpack = BackpackAccount(
             proxy=proxy,
@@ -635,13 +634,6 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
     await db_utils.fill_forks_table(forks_by_symbol)
 
     for pos in result:
-        # print(f"Символ: {pos['symbol']}")
-        # print(f"Аккаунт: {pos['account']}")
-        # print(f"Направление: {pos['direction']}")
-        # print(f"Базовый размер: ${pos['base_size']}")
-        # print(f"Плечо: {pos['leverage']}x")
-        # print(f"Итоговый размер: ${pos['total_size']}")
-        # print("---")
         if pos['symbol'] not in symbol_totals:
             symbol_totals[pos['symbol']] = {"long": 0, "short": 0}
         if pos['direction'] == "long":
@@ -649,7 +641,6 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
         else:
             symbol_totals[pos['symbol']]["short"] += pos['total_size']
 
-    print('===================')
     for symbol, totals in symbol_totals.items():
         print(f"\nСимвол: {symbol}")
         print(f"Итоговый размер лонг: ${round(totals['long'], 2)}")
@@ -685,7 +676,6 @@ async def process_fork(task: Forks, proxies: list[str]) -> bool:
         proxy = proxies[key_index]
         proxy_index = (proxy_index + 1) % len(proxies)
 
-        proxy_url = None
         change_link = ''
 
         if proxy:
@@ -694,7 +684,8 @@ async def process_fork(task: Forks, proxies: list[str]) -> bool:
             else:
                 proxy_url = proxy
 
-        proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
+            proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
+
         try:
             backpack = BackpackAccount(
                 proxy=proxy,
