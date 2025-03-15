@@ -349,23 +349,30 @@ async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optio
 
     results = {}
 
-    use_proxies = proxies and len(proxies) > 0
-
+    proxy_index = 0
     for i, api_key in enumerate(api_keys):
         try:
-            current_proxy = None
+            with open('wallets.txt', 'r') as file:
+                file_private_keys = [line.strip() for line in file]
 
-            if use_proxies:
-                proxy_index = i % len(proxies)
-                proxy_str = proxies[proxy_index]
-                if proxy_str and proxy_str.strip():
-                    if not proxy_str.startswith(('http://', 'https://', 'socks5://')):
-                        proxy_str = f"http://{proxy_str}"
+            key_index = file_private_keys.index(api_key)
 
-                    current_proxy = Proxy(proxy_url=proxy_str)
+            proxy = proxies[key_index]
+            proxy_index = (proxy_index + 1) % len(proxies)
+
+            proxy_url = None
+            change_link = ''
+
+            if proxy:
+                if MOBILE_PROXY:
+                    proxy_url, change_link = proxy.split('|')
+                else:
+                    proxy_url = proxy
+
+            proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
 
             backpack = BackpackAccount(
-                proxy=current_proxy,
+                proxy=proxy,
                 api_key=api_key
             )
 
@@ -390,7 +397,7 @@ async def process_multiple_deposit_addresses(api_keys: List[str], proxies: Optio
     return results
 
 
-async def process_cex_withdraw(route: Route) -> bool:
+async def process_cex_withdraw(route: Route) -> Optional[bool]:
     backpack = BackpackAccount(
         proxy=route.wallet.proxy,
         api_key=route.wallet.private_key
@@ -564,7 +571,6 @@ def create_delta_neutral_strategy(balances):
 
 
 async def process_forks_database_creation(keys: list[str], proxies: list[str]):
-    use_proxies = proxies and len(proxies) > 0
     balance_mapping = {}
 
     db_utils = DataBaseUtils(
@@ -573,20 +579,29 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
         )
     )
 
-    for i, api_key in enumerate(keys):
-        current_proxy = None
+    proxy_index = 0
+    for api_key in keys:
+        with open('wallets.txt', 'r') as file:
+            file_private_keys = [line.strip() for line in file]
 
-        if use_proxies:
-            proxy_index = i % len(proxies)
-            proxy_str = proxies[proxy_index]
-            if proxy_str and proxy_str.strip():
-                if not proxy_str.startswith(('http://', 'https://', 'socks5://')):
-                    proxy_str = f"http://{proxy_str}"
+        key_index = file_private_keys.index(api_key)
 
-                current_proxy = Proxy(proxy_url=proxy_str)
+        proxy = proxies[key_index]
+        proxy_index = (proxy_index + 1) % len(proxies)
+
+        proxy_url = None
+        change_link = ''
+
+        if proxy:
+            if MOBILE_PROXY:
+                proxy_url, change_link = proxy.split('|')
+            else:
+                proxy_url = proxy
+
+        proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
 
         backpack = BackpackAccount(
-            proxy=current_proxy,
+            proxy=proxy,
             api_key=api_key
         )
 
@@ -617,7 +632,6 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
         else:
             forks_by_symbol[symbol]['short'].append(pos_data)
 
-    print(forks_by_symbol)
     await db_utils.fill_forks_table(forks_by_symbol)
 
     for pos in result:
@@ -643,7 +657,7 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
         print(f"Дельта: ${round(totals['long'] - totals['short'], 2)}")
 
 
-async def process_fork(task: Forks) -> bool:
+async def process_fork(task: Forks, proxies: list[str]) -> bool:
     symbol = task.symbol
     forks = task.forks
 
@@ -661,10 +675,29 @@ async def process_fork(task: Forks) -> bool:
 
     random.shuffle(all_positions)
 
+    proxy_index = 0
     for position in all_positions:
+        with open('wallets.txt', 'r') as file:
+            file_private_keys = [line.strip() for line in file]
+
+        key_index = file_private_keys.index(position['account'])
+
+        proxy = proxies[key_index]
+        proxy_index = (proxy_index + 1) % len(proxies)
+
+        proxy_url = None
+        change_link = ''
+
+        if proxy:
+            if MOBILE_PROXY:
+                proxy_url, change_link = proxy.split('|')
+            else:
+                proxy_url = proxy
+
+        proxy = Proxy(proxy_url=proxy_url, change_link=change_link)
         try:
             backpack = BackpackAccount(
-                proxy=None,
+                proxy=proxy,
                 api_key=position['account']
             )
 
