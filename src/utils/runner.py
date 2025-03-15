@@ -565,12 +565,7 @@ def create_delta_neutral_strategy(balances):
 
 async def process_forks_database_creation(keys: list[str], proxies: list[str]):
     use_proxies = proxies and len(proxies) > 0
-    balance_mapping = {
-        "api_1": 500,
-        "api_2": 50,
-        "api_3": 50,
-
-    }
+    balance_mapping = {}
 
     db_utils = DataBaseUtils(
         manager_config=DataBaseManagerConfig(
@@ -578,33 +573,30 @@ async def process_forks_database_creation(keys: list[str], proxies: list[str]):
         )
     )
 
-    symbol = random.choice(BackpackFuturesSettings.symbol) + '_USDC_PERP'
+    for i, api_key in enumerate(keys):
+        current_proxy = None
 
-    # for i, api_key in enumerate(keys):
-    #     current_proxy = None
-    #
-    #     if use_proxies:
-    #         proxy_index = i % len(proxies)
-    #         proxy_str = proxies[proxy_index]
-    #         if proxy_str and proxy_str.strip():
-    #             if not proxy_str.startswith(('http://', 'https://', 'socks5://')):
-    #                 proxy_str = f"http://{proxy_str}"
-    #
-    #             current_proxy = Proxy(proxy_url=proxy_str)
-    #
-    #     backpack = BackpackAccount(
-    #         proxy=current_proxy,
-    #         api_key=api_key
-    #     )
-    #
-    #     balance = await backpack.get_balances("USDC")
-    #     balance_mapping.update({api_key: balance})
+        if use_proxies:
+            proxy_index = i % len(proxies)
+            proxy_str = proxies[proxy_index]
+            if proxy_str and proxy_str.strip():
+                if not proxy_str.startswith(('http://', 'https://', 'socks5://')):
+                    proxy_str = f"http://{proxy_str}"
+
+                current_proxy = Proxy(proxy_url=proxy_str)
+
+        backpack = BackpackAccount(
+            proxy=current_proxy,
+            api_key=api_key
+        )
+
+        balance = await backpack.get_balances("USDC")
+        balance_mapping.update({api_key: balance})
 
     result = create_delta_neutral_strategy(balance_mapping)
 
     symbol_totals = {}
 
-    # print(result)
     forks_by_symbol = {}
     for position in result:
         symbol = position['symbol']
